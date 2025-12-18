@@ -1,7 +1,7 @@
 streamlit
 yt-dlp
 youtube-transcript-api
-moviepy
-google-generativeai
+moviepy==1.0.3
+google-genai
 python-dotenv
 ffmpeg-python
