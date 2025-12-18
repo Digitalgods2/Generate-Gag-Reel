@@ -1,0 +1,7 @@
+streamlit
+yt-dlp
+youtube-transcript-api
+moviepy
+google-generativeai
+python-dotenv
+ffmpeg-python
