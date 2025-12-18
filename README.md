@@ -25,8 +25,8 @@ An AI-powered application that takes a YouTube video URL, analyzes its transcrip
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/generate-gag-reel.git
-   cd generate-gag-reel
+   git clone https://github.com/Digitalgods2/Video-Highlight-Extractor.git
+   cd Video-Highlight-Extractor
    ```
 
 2. Create and activate a virtual environment:
