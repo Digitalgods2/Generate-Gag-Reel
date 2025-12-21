@@ -6,19 +6,22 @@ An AI-powered application that takes a YouTube video URL, analyzes its transcrip
 
 - **Two Extraction Modes:**
   - 😂 **Funny Moments** - Creates a gag reel of the funniest sections
-  - 💬 **Memorable Quotes** - Extracts profound, clever, or quotable moments
-- **Smart Transcript Handling**: Auto-fetches transcripts or accepts manual input
-- **AI Analysis**: Uses Google's **Gemini AI** to intelligently identify the best moments
-- **Auto-Editing**: Downloads video and cuts/stitches segments with black slugs between clips
-- **Caching**: Re-run with different settings without re-downloading the video
+  - 💬 **Memorable Quotes** - Extracts profound, clever, weird, or quotable moments
+- **AI Quality Scoring**: Each clip is rated 1-10 with reasoning; only 8+ clips are kept
+- **Clip Preview & Selection**: Preview all detected clips before stitching; uncheck any you don't want
+- **Smart Transcript Handling**: Auto-fetches transcripts or accepts manual input with timestamps
+- **Re-Analyze Without Re-Downloading**: Switch modes or tweak settings instantly using cached video
 - **Configurable Settings**:
   - Max clip length (5-60 seconds)
-  - Max number of clips (3-20)
-- **API Key Persistence**: Save your API key to `.env` for convenience
+  - Max number of clips (3-50)
+- **FFmpeg-Accelerated Previews**: Fast clip extraction using direct FFmpeg seeking
+- **Context Buffers**: Clips include 0.5s pre-roll and 2.0s post-roll for complete sentences
+- **API Key Persistence**: Save your Gemini API key to `.env` for convenience
 
 ## Prerequisites
 
 - **Python 3.8+**
+- **FFmpeg**: Must be installed and in your PATH ([Download](https://ffmpeg.org/download.html))
 - **Gemini API Key**: Free at [Google AI Studio](https://aistudio.google.com/)
 
 ## Installation
@@ -53,18 +56,34 @@ An AI-powered application that takes a YouTube video URL, analyzes its transcrip
 2. In the sidebar:
    - Enter your **Gemini API Key**
    - Choose **Extraction Mode** (Funny Moments or Memorable Quotes)
-   - Adjust **Clip Settings** as needed
+   - Adjust **Clip Settings** (length, count)
 
-3. Paste a **YouTube URL** and click **🎬 Generate Reel**
+3. Paste a **YouTube URL** and click **🔍 Find Clips**
 
-4. The final video will be displayed and available for download.
+4. **Preview & Select**: Watch each clip, uncheck any duds
+
+5. Click **🎬 Stitch Selected Clips** to generate your reel
+
+6. Download the final video!
 
 ## Project Structure
 
-- `app.py` - Main Streamlit application
-- `analysis_utils.py` - Transcript fetching and AI analysis
-- `video_utils.py` - Video downloading (yt-dlp) and editing (moviepy)
-- `requirements.txt` - Python dependencies
+```
+├── app.py              # Main Streamlit application
+├── analysis_utils.py   # Transcript fetching & Gemini AI analysis
+├── video_utils.py      # Video download (yt-dlp) & editing (FFmpeg/MoviePy)
+├── requirements.txt    # Python dependencies
+└── .env                # API key storage (created on first save)
+```
+
+## How It Works
+
+1. **Transcript Extraction**: Fetches YouTube captions or parses manual input
+2. **AI Analysis**: Sends transcript to Gemini with strict quality criteria
+3. **Quality Filtering**: Each clip is scored 1-10; only 8+ are returned
+4. **Video Download**: Uses yt-dlp to fetch the video file
+5. **Preview Generation**: FFmpeg extracts each clip for preview
+6. **Final Stitching**: MoviePy concatenates selected clips with black slugs
 
 ## Disclaimer
 

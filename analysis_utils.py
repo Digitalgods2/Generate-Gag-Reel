@@ -38,26 +38,55 @@ def analyze_humor(transcript, api_key, max_clip_seconds=15, max_clips=5):
     # Create client with the new SDK
     client = genai.Client(api_key=api_key)
 
-    # Prepare transcript for prompt
+    # Prepare transcript for prompt - include start AND end times with clear labels
     formatted_transcript = ""
-    for entry in transcript:
+    for i, entry in enumerate(transcript):
         start = entry['start']
+        duration = entry.get('duration', 3)  # Default 3s if missing
+        end = start + duration
         text = entry['text']
-        formatted_transcript += f"[{start:.2f}] {text}\n"
+        formatted_transcript += f"LINE {i+1} | START:{start:.2f}s | END:{end:.2f}s | TEXT: \"{text}\"\n"
 
     prompt = f"""
     You are an expert video editor and comedian. Your task is to analyze the following transcript of a YouTube video and identify the FUNNIEST sections to create a "gag reel".
     
     CRITICAL INSTRUCTION: You must return valid JSON only. Do not wrap it in markdown code blocks.
-    The JSON should be a list of objects, where each object has a "start" and "end" timestamp (in seconds) representing a clip.
-    Example: [{{"start": 10.5, "end": 20.0}}, {{"start": 45.0, "end": 60.0}}]
+    The JSON should be a list of objects with "start", "end", "humor_score", and "reasoning" fields.
+    
+    HUMOR SCORE (1-10):
+    - 10: Absolutely hilarious, guaranteed laugh-out-loud moment
+    - 9: Very funny, would make most people laugh
+    - 8: Genuinely funny, solid comedic moment
+    - 7: Amusing but not remarkable
+    - 6 or below: Mildly interesting but not actually funny
+    
+    Example: 
+    [
+        {{"start": 10.5, "end": 20.0, "humor_score": 9, "reasoning": "Perfect timing on the joke about penguins, followed by genuine laughter."}}, 
+        {{"start": 45.0, "end": 60.0, "humor_score": 8, "reasoning": "Absurd situation that escalates quickly, very unexpected."}}
+    ]
+    
+    TIMING IS CRITICAL - Each transcript line shows [START_TIME - END_TIME]:
+    - Your clip "end" time MUST be the END_TIME of the last line you want to include, NOT the START_TIME
+    - The END_TIME is when the speaker FINISHES saying that line
+    - If you use a START_TIME as your end, you will CUT OFF their sentence mid-word
+    - Always include an extra 1-2 seconds after the last line's END_TIME for breathing room
     
     CRITERIA:
     1. Focus ONLY on genuinely HUMOROUS content: jokes, punchlines, funny reactions, laughter, comedic timing, or absurd statements.
     2. Do NOT include general "interesting" or "engaging" content unless it is actually funny.
     3. Each clip should be {max_clip_seconds} seconds or less.
-    4. Return EXACTLY {max_clips} clips - no more, no less. Pick only the BEST {max_clips}.
-    5. Quality over quantity - be very selective.
+    4. BE HONEST with your humor_score - do not inflate scores. Only rate 8+ if it's GENUINELY funny.
+    5. REASONING IS REQUIRED: You must explain in 1 sentence WHY this specific moment is funny.
+    
+    CRITICAL QUANTITY RULES:
+    - {max_clips} is the ABSOLUTE MAXIMUM, NOT a target or goal
+    - NEVER return exactly {max_clips} clips just because that's the limit
+    - Return ONLY clips that are genuinely funny - if only 2 moments are funny, return only 2
+    - IT IS BETTER TO RETURN 3 GREAT CLIPS THAN 10 MEDIOCRE ONES
+    - DO NOT pad with low-quality content to fill the quota
+    - If the video has no funny moments, return an EMPTY list []
+    - Be RUTHLESSLY selective - when in doubt, leave it out
     
     Here is the transcript:
     {formatted_transcript}
@@ -84,21 +113,46 @@ def analyze_humor(transcript, api_key, max_clip_seconds=15, max_clips=5):
         try:
             clips = json.loads(text_response)
         except json.JSONDecodeError:
-            # Fallback: use regex to extract timestamp pairs
+            # Fallback: use regex to extract timestamp pairs with optional humor_score
             import re
             print(f"JSON parse failed, trying regex fallback...")
-            pattern = r'"start"\s*:\s*([\d.]+)\s*,\s*"end"\s*:\s*([\d.]+)'
+            # Updated regex to handle reasoning (though simple regex might fail on complex reasoning strings, this is a fallback)
+            pattern = r'"start"\s*:\s*([\d.]+)\s*,\s*"end"\s*:\s*([\d.]+)\s*,\s*"humor_score"\s*:\s*(\d+)\s*,\s*"reasoning"\s*:\s*(".*?")'
             matches = re.findall(pattern, text_response)
             if matches:
-                clips = [{"start": float(m[0]), "end": float(m[1])} for m in matches]
+                # Fallback won't capture reasoning perfectly via regex, so we mock it if needed
+                clips = [{"start": float(m[0]), "end": float(m[1]), "humor_score": int(m[2]), "reasoning": m[3].strip('"')} for m in matches]
             else:
                 print(f"Regex fallback also failed")
                 return []
         
-        # Process clips to ensure they are valid tuples
+        # Process clips: filter by humor_score and enforce max length
+        MINIMUM_HUMOR_SCORE = 8
         results = []
+        filtered_count = 0
+        
         for clip in clips:
-            results.append((float(clip['start']), float(clip['end'])))
+            start = float(clip['start'])
+            end = float(clip['end'])
+            humor_score = int(clip.get('humor_score', 10))  # Default to 10 if missing
+            reasoning = clip.get('reasoning', 'No reasoning provided')
+            
+            # Filter out clips below the minimum humor score
+            if humor_score < MINIMUM_HUMOR_SCORE:
+                filtered_count += 1
+                print(f"Filtered out clip ({start:.1f}s - {end:.1f}s) Score: {humor_score}. Reason: {reasoning}")
+                continue
+            
+            print(f"ACCEPTED clip ({start:.1f}s - {end:.1f}s) Score: {humor_score}. Reason: {reasoning}")
+            
+            # Enforce max clip length
+            if end - start > max_clip_seconds:
+                end = start + max_clip_seconds
+            
+            results.append((start, end))
+        
+        if filtered_count > 0:
+            print(f"Filtered out {filtered_count} clips with humor_score below {MINIMUM_HUMOR_SCORE}")
             
         return results
 
@@ -118,40 +172,80 @@ def analyze_quotes(transcript, api_key, max_clip_seconds=15, max_clips=5):
     # Create client with the new SDK
     client = genai.Client(api_key=api_key)
 
-    # Prepare transcript for prompt
+    # Prepare transcript for prompt - include start AND end times with clear labels
     formatted_transcript = ""
-    for entry in transcript:
+    for i, entry in enumerate(transcript):
         start = entry['start']
+        duration = entry.get('duration', 3)  # Default 3s if missing
+        end = start + duration
         text = entry['text']
-        formatted_transcript += f"[{start:.2f}] {text}\n"
+        formatted_transcript += f"LINE {i+1} | START:{start:.2f}s | END:{end:.2f}s | TEXT: \"{text}\"\n"
 
     prompt = f"""
-    You are an expert video editor specializing in creating highlight reels. Your task is to analyze the following transcript of a YouTube video and identify the most MEMORABLE and QUOTABLE moments.
+    You are a world-class video editor with impeccable taste. Your job is to find ONLY the most EXCEPTIONAL moments in this transcript - the kind of quotes that would make someone stop scrolling and share the video.
     
     CRITICAL INSTRUCTION: You must return valid JSON only. Do not wrap it in markdown code blocks.
-    The JSON should be a list of objects, where each object has a "start" and "end" timestamp (in seconds) representing a clip.
-    Example: [{{"start": 10.5, "end": 20.0}}, {{"start": 45.0, "end": 60.0}}]
+    The JSON should be a list of objects with "start", "end", "quality_score", and "reasoning" fields.
     
-    QUALITY REQUIREMENTS:
-    - Each quote MUST be a COMPLETE THOUGHT or idea - never cut off mid-sentence
-    - Start the clip slightly before the quote begins so context is included
-    - End the clip after the thought is fully expressed
-    - Be EXTREMELY selective - only the absolute BEST quotes
+    QUALITY SCORE (1-10):
+    - 10: Absolutely legendary quote, instantly shareable
+    - 9: Exceptional moment that would make someone stop scrolling
+    - 8: Genuinely great quote worth including
+    - 7: Decent but not remarkable
+    - 6 or below: Not worth including
     
-    WHAT TO LOOK FOR (only pick the CREAM OF THE CROP):
-    1. Profound statements - deep, meaningful insights about life, work, or relationships
-    2. Good advice - practical wisdom that viewers could apply
-    3. Clever observations - witty, smart, or insightful comments
-    4. Weird or unique statements - unusual perspectives that stand out
-    5. Special moments - emotional revelations, surprising admissions, or powerful declarations
-    6. Quotable sound bites - memorable phrases that could go viral
+    Example: 
+    [
+        {{"start": 10.5, "end": 20.0, "quality_score": 9, "reasoning": "Profound insight about life that resonates universally."}}, 
+        {{"start": 45.0, "end": 60.0, "quality_score": 8, "reasoning": "Very witty remark that perfectly sums up the situation."}}
+    ]
     
-    CONSTRAINTS:
-    - Return EXACTLY {max_clips} clips - no more, no less
-    - Pick ONLY the absolute BEST {max_clips} moments from the entire video
+    TIMING IS CRITICAL - Each transcript line shows [START_TIME - END_TIME]:
+    - Your clip "end" time MUST be the END_TIME of the last line you want to include, NOT the START_TIME
+    - The END_TIME is when the speaker FINISHES saying that line
+    - If you use a START_TIME as your end, you will CUT OFF their sentence mid-word
+    - Always add 2-3 seconds AFTER the last line's END_TIME for breathing room
+    
+    ABSOLUTE REQUIREMENTS FOR COMPLETENESS (READ CAREFULLY):
+    - **NEVER cut off a sentence mid-thought.**
+    - The selected text MUST end with a sentence-ending punctuation mark (period, question mark, or exclamation point).
+    - If the line you picked doesn't end with punctuation, YOU MUST INCLUDE THE NEXT LINE.
+    - check the LINE BEFORE: Does the sentence start there? If so, INCLUDE IT.
+    - check the LINE AFTER: Does the sentence continue there? If so, INCLUDE IT.
+    - It is better to include slightly too much context than to cut off the idea.
+    - Each quote MUST be a COMPLETE, SELF-CONTAINED IDEA.
+    - Verify that the start and end timestamps cover the ENTIRE sentence structure.
+    
+    ABSOLUTE REQUIREMENTS:
+    - Include 1-2 seconds BEFORE the quote starts for context
+    - BE HONEST with your quality_score - do not inflate scores. Only rate 8+ if it's truly exceptional.
+    - REASONING IS REQUIRED: You must explain in 1 sentence WHY this specific quote is exceptional.
+    
+    WHAT MAKES A QUOTE WORTH INCLUDING (must fit AT LEAST ONE):
+    1. FUNNY - genuinely hilarious, not just mildly amusing. Would make someone laugh out loud.
+    2. WEIRD - bizarre, unexpected, or strange enough to be memorable
+    3. PROFOUND - deep insight that makes you think differently about something important
+    4. GREAT ADVICE - actionable wisdom that could genuinely help someone's life, career, or relationships
+    5. QUOTABLE - a phrase so well-crafted it could become a catchphrase or be printed on a t-shirt
+    
+    WHAT TO REJECT (DO NOT include these):
+    - Trivial observations or small talk
+    - Incomplete thoughts or sentences that trail off
+    - Generic statements anyone could make
+    - Transitions like "so anyway" or "moving on"
+    - Questions without memorable answers
+    - Anything that requires context from before/after to understand
+    
+    CRITICAL QUANTITY RULES:
+    - {max_clips} is the ABSOLUTE MAXIMUM, NOT a target or goal
+    - NEVER return exactly {max_clips} clips just because that's the limit
+    - Return ONLY clips that genuinely meet the criteria above
+    - IT IS BETTER TO RETURN 3 GREAT CLIPS THAN 10 MEDIOCRE ONES
+    - DO NOT pad with low-quality content to fill the quota
+    - If only 2 moments qualify, return only 2
+    - If the video has no qualifying moments, return an EMPTY list []
+    - Be RUTHLESSLY selective - when in doubt, leave it out
     - Each clip MUST be {max_clip_seconds} seconds or less
-    - If a great quote would exceed {max_clip_seconds} seconds, trim it to the most essential part while keeping it complete
-    - Prefer shorter, punchier quotes over long rambling sections
     
     Here is the transcript:
     {formatted_transcript}
@@ -178,21 +272,42 @@ def analyze_quotes(transcript, api_key, max_clip_seconds=15, max_clips=5):
         try:
             clips = json.loads(text_response)
         except json.JSONDecodeError:
-            # Fallback: use regex to extract timestamp pairs
+            # Fallback: use regex to extract timestamp pairs with optional quality_score
             import re
             print(f"JSON parse failed, trying regex fallback...")
-            pattern = r'"start"\s*:\s*([\d.]+)\s*,\s*"end"\s*:\s*([\d.]+)'
+            pattern = r'"start"\s*:\s*([\d.]+)\s*,\s*"end"\s*:\s*([\d.]+)(?:\s*,\s*"quality_score"\s*:\s*(\d+))?'
             matches = re.findall(pattern, text_response)
             if matches:
-                clips = [{"start": float(m[0]), "end": float(m[1])} for m in matches]
+                clips = [{"start": float(m[0]), "end": float(m[1]), "quality_score": int(m[2]) if m[2] else 10} for m in matches]
             else:
                 print(f"Regex fallback also failed")
                 return []
         
-        # Process clips to ensure they are valid tuples
+        # Process clips: filter by quality_score and enforce max length
+        MINIMUM_QUALITY_SCORE = 8
         results = []
+        filtered_count = 0
+        
         for clip in clips:
-            results.append((float(clip['start']), float(clip['end'])))
+            start = float(clip['start'])
+            end = float(clip['end'])
+            quality_score = int(clip.get('quality_score', 10))  # Default to 10 if missing
+            reasoning = clip.get('reasoning', 'No reasoning provided')
+            
+            # Filter out clips below the minimum quality score
+            if quality_score < MINIMUM_QUALITY_SCORE:
+                filtered_count += 1
+                print(f"Filtered out quote ({start:.1f}s - {end:.1f}s) Score: {quality_score}. Reason: {reasoning}")
+                continue
+            
+            # Enforce max clip length
+            if end - start > max_clip_seconds:
+                end = start + max_clip_seconds
+            
+            results.append((start, end))
+        
+        if filtered_count > 0:
+            print(f"Filtered out {filtered_count} quotes with quality_score below {MINIMUM_QUALITY_SCORE}")
             
         return results
 
@@ -203,7 +318,7 @@ def analyze_quotes(transcript, api_key, max_clip_seconds=15, max_clips=5):
 def parse_manual_transcript(text):
     """
     Parses a manually pasted transcript string into the expected format:
-    [{'start': 0.0, 'text': 'words'}, ...]
+    [{'start': 0.0, 'text': 'words', 'duration': 5.0}, ...]
     
     Supports:
     [00:12] Hello world
@@ -214,7 +329,6 @@ def parse_manual_transcript(text):
     import re
     
     # Regex to find timestamps: HH:MM:SS or MM:SS or M:SS
-    # Captures timestamp in group 1
     timestamp_regex = r"\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?"
     
     lines = text.split('\n')
@@ -239,17 +353,15 @@ def parse_manual_transcript(text):
             elif len(parts) == 2: # MM:SS
                 seconds = parts[0]*60 + parts[1]
                 
-            # Remove timestamp from text if it's on the same line
-            # "00:12 Hello" -> "Hello"
-            # "00:12" -> ""
+            # Remove timestamp from text
             remaining_text = line[match.end():].strip()
             
             # If we had a previous entry, save it
             if current_entry and current_entry['text']:
                 entries.append(current_entry)
             
-            # Start new entry
-            current_entry = {'start': float(seconds), 'text': remaining_text, 'duration': 0.0}
+            # Start new entry (duration will be calculated after)
+            current_entry = {'start': float(seconds), 'text': remaining_text}
             
         else:
             # No timestamp, append to current entry text
@@ -262,6 +374,18 @@ def parse_manual_transcript(text):
     # Append the last one
     if current_entry and current_entry['text']:
         entries.append(current_entry)
+    
+    # Calculate durations based on gaps between timestamps
+    for i in range(len(entries)):
+        if i < len(entries) - 1:
+            # Duration = next entry's start - this entry's start
+            entries[i]['duration'] = entries[i+1]['start'] - entries[i]['start']
+        else:
+            # Last entry - estimate 5 seconds
+            entries[i]['duration'] = 5.0
+        
+        # Ensure minimum duration of 2 seconds
+        if entries[i]['duration'] < 2.0:
+            entries[i]['duration'] = 2.0
         
     return entries
-
