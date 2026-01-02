@@ -1,8 +1,10 @@
+import glob
+import os
+import subprocess
+import uuid
+
 import yt_dlp
 from moviepy.editor import VideoFileClip, concatenate_videoclips, ColorClip
-import os
-import uuid
-import glob
 
 # Buffer constants (in seconds) - used for clip extraction
 PRE_ROLL_BUFFER = 0.5   # Added before clip start to catch first syllable
@@ -26,7 +28,7 @@ def cleanup_old_files():
         for file in glob.glob(pattern):
             try:
                 os.remove(file)
-            except:
+            except OSError:
                 pass  # Ignore if file is locked
 
 def download_video(url):
@@ -139,7 +141,6 @@ def create_single_clip(video_path, start, end, index):
     This is much faster than MoviePy for long videos as it seeks directly.
     Returns the path to the preview clip.
     """
-    import subprocess
     
     unique_id = uuid.uuid4().hex[:8]
     output_path = f"preview_clip_{index}_{unique_id}.mp4"
@@ -240,10 +241,10 @@ def create_single_clip_moviepy(video_path, start, end, index):
         if subclip:
             try:
                 subclip.close()
-            except:
+            except Exception:  # pylint: disable=broad-except
                 pass
         if original_clip:
             try:
                 original_clip.close()
-            except:
+            except Exception:  # pylint: disable=broad-except
                 pass
